@@ -1,7 +1,9 @@
 read_luminex_excel <- function(
-    path_to_files, ## Charachter vector of strings with length N files 
+    path_to_files, ## Character vector of strings with length N files 
     trim_regex = NULL,   ## Regex of strings to remove from analyte names  # .e.g all analyte names may have suffix " (##)" 
-    exclude_sheets = "Standard Curve" ## Charachter vector with sheets to be excluded
+    exclude_sheets = "Standard Curve", ## Character vector with sheets to be excluded
+    include_filename = T, # Logical, whether the file name from path_to_files is appended as a column 
+    plate_metadata = c("Plate ID", "Acquisition Date") ## Character vector with information in header about plate to be included as additional fields
 ) {
   
   ##############################
@@ -73,7 +75,6 @@ read_luminex_excel <- function(
     col_names = FALSE,
     cell_cols(c("A", "B"))
   )
-  
 
   ## Identify row containing the header rows and tail rows
   ## There are two header rows, one for the replicate-averaged value and one for the replicate values.
@@ -110,6 +111,7 @@ read_luminex_excel <- function(
       "Input worksheet structure may be malformed."
     )
   }
+
   
   ##############################
   # Extract data across files and sheets
@@ -168,8 +170,37 @@ read_luminex_excel <- function(
           mutate(Analyte = stringr::str_remove_all(Analyte, trim_regex))
       }
       
-      y_out <- y_out %>% 
-        mutate(Filename = file)
+      if(include_filename){
+        y_out <- y_out %>% 
+          mutate(Filename = file)
+      }
+    
+      
+      if (!is.null(plate_metadata)) {
+        
+        # Extract non-NA  before the first header row
+        plate_data_lines <- y[2:(header_rows[1] - 1), 1] %>%
+          unlist() %>%
+          discard(is.na)
+        
+        # Split into key/value pairs
+        kv <- str_split_fixed(plate_data_lines, ":", n = 2)
+        
+        # Trim values and create named vector
+        plate_data <- str_trim(kv[, 2]) %>% set_names(kv[, 1])
+
+        if (length(intersect(plate_metadata,names(plate_data))) == 0) {
+          stop(
+            "Plate metadata (",
+            paste(setdiff(plate_metadata,names(plate_data)), collapse = ", "),
+            ") not identified in header."
+          )
+        } else {
+          y_out <- y_out %>% bind_cols(as.list(plate_data[plate_metadata]))
+        }
+
+      }
+      
       
       y_out
     })) %>%

@@ -168,6 +168,9 @@ read_luminex_excel <- function(
           mutate(Analyte = stringr::str_remove_all(Analyte, trim_regex))
       }
       
+      y_out <- y_out %>% 
+        mutate(Filename = file)
+      
       y_out
     })) %>%
     select(data) %>%

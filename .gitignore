@@ -1,0 +1,8 @@
+# R
+.Rhistory
+.RData
+.Rproj.user/
+
+# Excel / CSV / output files
+*.csv
+*.xlsx

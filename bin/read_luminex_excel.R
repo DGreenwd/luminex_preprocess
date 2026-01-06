@@ -3,7 +3,8 @@ read_luminex_excel <- function(
     trim_regex = NULL,   ## Regex of strings to remove from analyte names  # .e.g all analyte names may have suffix " (##)" 
     exclude_sheets = "Standard Curve", ## Character vector with sheets to be excluded
     include_filename = T, # Logical, whether the file name from path_to_files is appended as a column 
-    plate_metadata = c("Plate ID", "Acquisition Date") ## Character vector with information in header about plate to be included as additional fields
+    plate_metadata = c("Plate ID", "Acquisition Date"), ## Character vector with information in header about plate to be included as additional fields
+    simplify_colnames = T
 ) {
   
   ##############################
@@ -70,6 +71,7 @@ read_luminex_excel <- function(
   ##############################
   
   x <- readxl::read_xlsx(
+    .name_repair = "unique_quiet",
     path_to_files[1],
     sheet = sheets[1],
     col_names = FALSE,
@@ -123,6 +125,7 @@ read_luminex_excel <- function(
     mutate(data = map2(file, sheet, function(file, sheet) {
       
       y <- readxl::read_xlsx(
+        .name_repair = "unique_quiet",
         path = file,
         sheet = sheet,
         col_names = FALSE
@@ -206,6 +209,10 @@ read_luminex_excel <- function(
     })) %>%
     select(data) %>%
     unnest(data)
+  
+  if(simplify_colnames){
+    output <- output %>% rename_with(~ gsub("\\s+", "_", tolower(.x)))
+  }
   
   output
 }

@@ -70,7 +70,7 @@ process_plate_layout <- function(path,
       long %>%
     filter(!is.na(sample_id)) %>%
     select(
-      plate,
+      plate_id = plate,
       row,
       column,
       well,

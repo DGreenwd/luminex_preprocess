@@ -4,7 +4,9 @@ read_luminex_excel <- function(
     exclude_sheets = "Standard Curve", ## Character vector with sheets to be excluded
     include_filename = T, # Logical, whether the file name from path_to_files is appended as a column 
     plate_metadata = c("Plate ID", "Acquisition Date"), ## Character vector with information in header about plate to be included as additional fields
-    simplify_colnames = T
+    simplify_colnames = T,
+    verbose = T,
+    technical_replicates = T
 ) {
   
   ##############################
@@ -46,17 +48,44 @@ read_luminex_excel <- function(
   
   sheets <- readxl::excel_sheets(path_to_files[1])
   
-  if (!all(sapply(path_to_files[-1], function(x) {
-    all(readxl::excel_sheets(x) %in% sheets)
-  }))) {
-    stop(
-      "Inconsistent worksheet structure across input Excel files. ",
-      "All files are expected to contain the same sheet names as the first file."
-    )
-  }
-  
   # Exclude sheets
   sheets <- setdiff(sheets, exclude_sheets)
+  
+  if (!all(sapply(path_to_files[-1], function(x) {
+    all(setdiff(readxl::excel_sheets(x),exclude_sheets) %in% sheets)
+  }))) {
+    
+    bad_sheets <- lapply(path_to_files[-1], function(f) { setdiff(readxl::excel_sheets(f), sheets) }) 
+    names(bad_sheets) = path_to_files[-1]
+    bad_sheets <- Filter(length, bad_sheets) # drop empty entries
+    
+    
+    # stop(
+    #   "Inconsistent worksheet structure across input Excel files. ",
+    #   "All files are expected to contain the same sheet names as the first file.\n",
+    #   "Issues:",
+    #   str(bad_sheets)
+    # )
+    stop(
+      paste0(
+        "Inconsistent worksheet structure across input Excel files.\n",
+        "All files are expected to contain the same sheet names as the first file.\n",
+        "Consider adding these sheets to argument `exclude_sheets`:\n",
+        paste(sprintf(
+          "%s: %s",
+          names(bad_sheets),
+          vapply(
+            bad_sheets,
+            paste,
+            collapse = ", ",
+            FUN.VALUE = character(1)
+          )
+        ), collapse = "\n"),
+        sep = ""
+      )
+    )
+    
+  }
   
   if (length(sheets) == 0) {
     stop(
@@ -70,49 +99,51 @@ read_luminex_excel <- function(
   # Identify header rows and data tail rows
   ##############################
   
-  x <- readxl::read_xlsx(
-    .name_repair = "unique_quiet",
-    path_to_files[1],
-    sheet = sheets[1],
-    col_names = FALSE,
-    cell_cols(c("A", "B"))
-  )
-
-  ## Identify row containing the header rows and tail rows
-  ## There are two header rows, one for the replicate-averaged value and one for the replicate values.
-  ## Each has values "Type" and "Well" in col 1 and 2 respectively 
+  # Moved to per sheet parsing
   
-  header_rows <- which(x[, 1] == "Type" & x[, 2] == "Well")
-  
-  if (length(header_rows) != 2) {
-    stop(
-      "Expected exactly two header rows identified by 'Type' and 'Well'. ",
-      "Found ", length(header_rows), "."
-    )
-  }
-  
-  ##Tail rows (last rows to retain):
-  ## for the replicate average values, the tail row corresponds to the third NA value in column 1, minus 1 row 
-  ## for the replicate values, the tail row corresponds to the sixth NA value in column 1, minus 1 row 
-  tail_rows <- c(
-    x %>%
-      pull(1) %>%
-      is.na() %>%
-      which() %>%
-      nth(3) - 1,
-    x %>%
-      pull(1) %>%
-      is.na() %>%
-      which() %>%
-      nth(6) - 1
-  )
-  
-  if (any(is.na(tail_rows))) {
-    stop(
-      "Failed to determine tail rows for data blocks. ",
-      "Input worksheet structure may be malformed."
-    )
-  }
+  # x <- readxl::read_xlsx(
+  #   .name_repair = "unique_quiet",
+  #   path_to_files[1],
+  #   sheet = sheets[1],
+  #   col_names = FALSE,
+  #   cell_cols(c("A", "B"))
+  # )
+  # 
+  # ## Identify row containing the header rows and tail rows
+  # ## There are two header rows, one for the replicate-averaged value and one for the replicate values.
+  # ## Each has values "Type" and "Well" in col 1 and 2 respectively 
+  # 
+  # header_rows <- which(x[, 1] == "Type" & x[, 2] == "Well")
+  # 
+  # if (length(header_rows) != 2) {
+  #   stop(
+  #     "Expected exactly two header rows identified by 'Type' and 'Well'. ",
+  #     "Found ", length(header_rows), "."
+  #   )
+  # }
+  # 
+  # ##Tail rows (last rows to retain):
+  # ## for the replicate average values, the tail row corresponds to the third NA value in column 1, minus 1 row 
+  # ## for the replicate values, the tail row corresponds to the sixth NA value in column 1, minus 1 row 
+  # tail_rows <- c(
+  #   x %>%
+  #     pull(1) %>%
+  #     is.na() %>%
+  #     which() %>%
+  #     nth(3) - 1,
+  #   x %>%
+  #     pull(1) %>%
+  #     is.na() %>%
+  #     which() %>%
+  #     nth(6) - 1
+  # )
+  # 
+  # if (any(is.na(tail_rows))) {
+  #   stop(
+  #     "Failed to determine tail rows for data blocks. ",
+  #     "Input worksheet structure may be malformed."
+  #   )
+  # }
 
   
   ##############################
@@ -121,53 +152,104 @@ read_luminex_excel <- function(
   
   ### Apply the extraction to the cartesian product of files and sheet names (all sheets for all files)
   
-  output <- tidyr::expand_grid(file = path_to_files, sheet = sheets) %>%
+  output <- 
+    tidyr::expand_grid(file = path_to_files, sheet = sheets) %>%
     mutate(data = map2(file, sheet, function(file, sheet) {
       
-      y <- readxl::read_xlsx(
-        .name_repair = "unique_quiet",
-        path = file,
-        sheet = sheet,
-        col_names = FALSE
-      )
+      if(verbose){
+         print(paste0("File: ",file," ",
+                   "Sheet: ", sheet))
+      }
       
-      analyte_names <- unlist(y[header_rows[1] - 1, ])
+      if(technical_replicates){
+        head_tail <-
+          identify_header_and_tail(path = file,
+                                   sheet = sheet,
+                                   technical_replicates = technical_replicates)
+        header_rows <- head_tail$header_rows
+        tail_rows <- head_tail$tail_rows
+        
+        y <- readxl::read_xlsx(
+          .name_repair = "unique_quiet",
+          path = file,
+          sheet = sheet,
+          col_names = FALSE
+        )
+        
+        analyte_names <- unlist(y[header_rows[1] - 1,])
+        
+        y_average <- y[header_rows[1]:tail_rows[1],]
+        y_reps    <- y[header_rows[2]:tail_rows[2],]
+        
+        y_average[1, which(!is.na(analyte_names))] <-
+          as.list(analyte_names[!is.na(analyte_names)])
+        
+        y_reps[1, which(!is.na(analyte_names))] <-
+          as.list(analyte_names[!is.na(analyte_names)])
+        
+        y_average <- y_average %>%
+          rename_with( ~ as.character(y_average[1,])) %>%
+          slice(-1)
+        
+        y_reps <- y_reps %>%
+          rename_with( ~ as.character(y_reps[1,])) %>%
+          slice(-1)
+        
+        y_average <- y_average %>%
+          pivot_longer(!c("Type", "Well"),
+                       names_to = "Analyte",
+                       values_to = "Value") %>%
+          mutate(Set = "average", Measure = sheet)
+        
+        y_reps <- y_reps %>%
+          pivot_longer(!c("Type", "Well"),
+                       names_to = "Analyte",
+                       values_to = "Value") %>%
+          mutate(Set = "replicate", Measure = sheet)
+        
+        y_out <- bind_rows(y_average, y_reps)
+        
+
+      }
       
-      y_average <- y[header_rows[1]:tail_rows[1], ]
-      y_reps    <- y[header_rows[2]:tail_rows[2], ]
+      if(technical_replicates == F){
+        head_tail <-
+          identify_header_and_tail(path = file,
+                                   sheet = sheet,
+                                   technical_replicates = technical_replicates)
+        header_rows <- head_tail$header_rows
+        tail_rows <- head_tail$tail_rows
+        
+        y <- readxl::read_xlsx(
+          .name_repair = "unique_quiet",
+          path = file,
+          sheet = sheet,
+          col_names = FALSE
+        )
+        
+        analyte_names <- unlist(y[header_rows[1] - 1,])
+        
+        y_average <- y[header_rows[1]:tail_rows[1],]
+        
+        y_average[1, which(!is.na(analyte_names))] <-
+          as.list(analyte_names[!is.na(analyte_names)])
+        
+        y_average <- y_average %>%
+          rename_with( ~ as.character(y_average[1,])) %>%
+          slice(-1)
+        
+        y_average <- y_average %>%
+          pivot_longer(!c("Type", "Well"),
+                       names_to = "Analyte",
+                       values_to = "Value") %>%
+          mutate(Set = "average", Measure = sheet)
+        
+        y_out <- y_average
+        
+        
+      }
       
-      y_average[1, which(!is.na(analyte_names))] <-
-        as.list(analyte_names[!is.na(analyte_names)])
-      
-      y_reps[1, which(!is.na(analyte_names))] <-
-        as.list(analyte_names[!is.na(analyte_names)])
-      
-      y_average <- y_average %>%
-        rename_with(~ as.character(y_average[1, ])) %>%
-        slice(-1)
-      
-      y_reps <- y_reps %>%
-        rename_with(~ as.character(y_reps[1, ])) %>%
-        slice(-1)
-      
-      y_average <- y_average %>%
-        pivot_longer(
-          !c("Type", "Well"),
-          names_to = "Analyte",
-          values_to = "Value"
-        ) %>%
-        mutate(Set = "average", Measure = sheet)
-      
-      y_reps <- y_reps %>%
-        pivot_longer(
-          !c("Type", "Well"),
-          names_to = "Analyte",
-          values_to = "Value"
-        ) %>%
-        mutate(Set = "replicate", Measure = sheet)
-      
-      y_out <- bind_rows(y_average, y_reps)
-      
+
       if (!is.null(trim_regex)) {
         y_out <- y_out %>%
           mutate(Analyte = stringr::str_remove_all(Analyte, trim_regex))

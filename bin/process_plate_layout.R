@@ -92,6 +92,7 @@ validate_plate_layout <- function(df,
   require(glue)
   require(tidyr)
   require(dplyr)
+  require(rlang)
   
   ##############################
   # Validate row identifiers

@@ -17,11 +17,18 @@ read_luminex_excel <- function(
     stop("`path_to_files` must be a non-empty character vector of file paths.")
   }
   
-  if (!all(file.exists(path_to_files))) {
-    stop(
-      "The following files do not exist:\n",
-      paste(path_to_files[!file.exists(path_to_files)], collapse = "\n")
-    )
+  if (any(grepl("^https",path_to_files))){
+    cat("File path(s) appear to be URLs.\n")
+    url_fls = T
+
+  } else {
+    url_fls = F
+    if (!all(file.exists(path_to_files))) {
+      stop(
+        "The following files do not exist:\n",
+        paste(path_to_files[!file.exists(path_to_files)], collapse = "\n")
+      )
+    }
   }
   
   ## Regex of strings to remove from analyte names 
@@ -41,6 +48,22 @@ read_luminex_excel <- function(
   require(tidyr)
   require(purrr)
   require(stringr)
+  
+  # URL temporary files 
+  if(url_fls){
+    
+    
+    # Generate one tempfile per URL
+    temp_files <- sapply(path_to_files, function(x) tempfile(fileext = ".xlsx"))
+  
+    # Download each file
+    for (i in seq_along(path_to_files)) {
+      download.file(path_to_files[i], destfile = temp_files[i], mode = "wb")
+    }
+    
+    path_to_files = temp_files 
+    
+  }
   
   ##############################
   # Check sheet name consistency
@@ -94,56 +117,6 @@ read_luminex_excel <- function(
       "), no worksheets remain to process."
     )
   }
-  
-  ##############################
-  # Identify header rows and data tail rows
-  ##############################
-  
-  # Moved to per sheet parsing
-  
-  # x <- readxl::read_xlsx(
-  #   .name_repair = "unique_quiet",
-  #   path_to_files[1],
-  #   sheet = sheets[1],
-  #   col_names = FALSE,
-  #   cell_cols(c("A", "B"))
-  # )
-  # 
-  # ## Identify row containing the header rows and tail rows
-  # ## There are two header rows, one for the replicate-averaged value and one for the replicate values.
-  # ## Each has values "Type" and "Well" in col 1 and 2 respectively 
-  # 
-  # header_rows <- which(x[, 1] == "Type" & x[, 2] == "Well")
-  # 
-  # if (length(header_rows) != 2) {
-  #   stop(
-  #     "Expected exactly two header rows identified by 'Type' and 'Well'. ",
-  #     "Found ", length(header_rows), "."
-  #   )
-  # }
-  # 
-  # ##Tail rows (last rows to retain):
-  # ## for the replicate average values, the tail row corresponds to the third NA value in column 1, minus 1 row 
-  # ## for the replicate values, the tail row corresponds to the sixth NA value in column 1, minus 1 row 
-  # tail_rows <- c(
-  #   x %>%
-  #     pull(1) %>%
-  #     is.na() %>%
-  #     which() %>%
-  #     nth(3) - 1,
-  #   x %>%
-  #     pull(1) %>%
-  #     is.na() %>%
-  #     which() %>%
-  #     nth(6) - 1
-  # )
-  # 
-  # if (any(is.na(tail_rows))) {
-  #   stop(
-  #     "Failed to determine tail rows for data blocks. ",
-  #     "Input worksheet structure may be malformed."
-  #   )
-  # }
 
   
   ##############################
@@ -291,6 +264,9 @@ read_luminex_excel <- function(
     })) %>%
     select(data) %>%
     unnest(data)
+  
+  if(url_fls)
+    unlink(temp_files)
   
   if(simplify_colnames){
     output <- output %>% rename_with(~ gsub("\\s+", "_", tolower(.x)))

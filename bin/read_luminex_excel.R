@@ -4,7 +4,6 @@ read_luminex_excel <- function(
     exclude_sheets = "Standard Curve", ## Character vector with sheets to be excluded
     include_filename = T, # Logical, whether the file name from path_to_files is appended as a column 
     plate_metadata = c("Plate ID", "Acquisition Date"), ## Character vector with information in header about plate to be included as additional fields
-    simplify_colnames = T,
     verbose = T,
     technical_replicates = T
 ) {
@@ -20,7 +19,6 @@ read_luminex_excel <- function(
   if (any(grepl("^https",path_to_files))){
     cat("File path(s) appear to be URLs.\n")
     url_fls = T
-
   } else {
     url_fls = F
     if (!all(file.exists(path_to_files))) {
@@ -58,9 +56,14 @@ read_luminex_excel <- function(
   
     # Download each file
     for (i in seq_along(path_to_files)) {
-      download.file(path_to_files[i], destfile = temp_files[i], mode = "wb")
+      download.file(path_to_files[i], destfile = temp_files[i], mode = "wb",quiet = T)
     }
     
+    # Store original filenames and temp file names 
+    path_df = data.frame(filename = temp_files,
+                         original_name = path_to_files)
+    
+    # For consistent functionality, overwrite path_to_files with temp_file paths 
     path_to_files = temp_files 
     
   }
@@ -265,11 +268,18 @@ read_luminex_excel <- function(
     select(data) %>%
     unnest(data)
   
-  if(url_fls)
-    unlink(temp_files)
+  # Lower case columns
+  output <- output %>% rename_with(~ gsub("\\s+", "_", tolower(.x)))
   
-  if(simplify_colnames){
-    output <- output %>% rename_with(~ gsub("\\s+", "_", tolower(.x)))
+  # If files are accessed from url
+  if(url_fls){
+    # unlink temporary files created
+    unlink(temp_files)
+    
+    output <- output %>% 
+      left_join(.,path_df,by="filename") %>% 
+      mutate(filename=original_name) %>% 
+      select(-original_name)
   }
   
   output

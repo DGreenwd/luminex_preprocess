@@ -1,13 +1,14 @@
+require(readxl)
+require(dplyr)
+require(readr)
+require(tidyr)
+require(stringr)
+require(janitor)
+
 process_plate_layout <- function(path,
                                  valid_rows = LETTERS[1:8],
                                  valid_columns = 1:12,
                                  expected_wells = 96) {
-  
-  require(readxl)
-  require(dplyr)
-  require(readr)
-  require(tidyr)
-  require(stringr)
 
   raw <- read_xlsx(path,
                    .name_repair = "unique_quiet",
@@ -82,6 +83,86 @@ process_plate_layout <- function(path,
 
 }
 
+process_plate_layout_multisheet <- function(
+    path,
+    valid_rows = LETTERS[1:8],
+    valid_columns = 1:12,
+    expected_wells = 96){
+  
+  
+  # Plate names stored in name of excel sheet 
+  sheet_names <- readxl::excel_sheets(path)
+  
+  # Load each sheet
+  raw <- lapply(sheet_names, function(x) {
+    read_xlsx(path,
+              sheet = x,
+              .name_repair = "unique_quiet",
+              col_names = FALSE)
+  })
+  names(raw) <- sheet_names
+  
+  # Process each sheet into a long format
+  long <- 
+    imap(
+      .x = raw,
+      .f = function(d, plate_name) {
+        
+        d %>%
+          
+          # Extract column names from first row
+          row_to_names(.,row_number = 1) %>% 
+          
+          # Annotate plate name from the list index 
+          mutate(plate = plate_name) %>% 
+          
+          # Rename Position to row (A:H)
+          rename(row = Position) %>% 
+          
+          # Pivot longer extracing column from column names 1:12 (excluding row and plate)
+          pivot_longer(cols = -c(plate, row),
+                       names_to = "column",
+                       values_to = "sample_id") %>%
+          
+          # numeric column
+          mutate(column = as.numeric(column)) %>% 
+          
+          # Explicit missingness for empty wells
+          complete(
+            plate,
+            row,
+            column,
+            fill = list(sample_id = NA_character_)) %>% 
+            
+          # Add well number
+          mutate(well   = paste0(row, column))
+  })
+  
+  long <- bind_rows(long)
+  
+  
+   
+  # Check plate layout 
+  if(
+    validate_plate_layout(
+    long,
+    valid_rows      = valid_rows,
+    valid_columns   = valid_columns,
+    expected_wells  = expected_wells
+    ) == T){
+    long %>%
+      filter(!is.na(sample_id)) %>%
+      select(
+        plate_id = plate,
+        row,
+        column,
+        well,
+        sample_id
+      ) %>%
+      as_tibble()
+  }
+}
+
 
 validate_plate_layout <- function(df,
                                   valid_rows = LETTERS[1:8],
@@ -130,7 +211,7 @@ validate_plate_layout <- function(df,
   ##############################
 
   bad_plates <- df %>%
-    filter(!is.na(sample_id)) %>%
+    #filter(!is.na(sample_id)) %>%
     count(plate, name = "n_wells") %>%
     filter(n_wells != expected_wells)
 

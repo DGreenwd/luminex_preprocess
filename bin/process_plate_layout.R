@@ -7,8 +7,7 @@ require(janitor)
 
 process_plate_layout <- function(path,
                                  valid_rows = LETTERS[1:8],
-                                 valid_columns = 1:12,
-                                 expected_wells = 96) {
+                                 valid_columns = 1:12) {
 
   raw <- read_xlsx(path,
                    .name_repair = "unique_quiet",
@@ -60,13 +59,36 @@ process_plate_layout <- function(path,
       well   = paste0(row, column)
     )
   
+  # Each row/column represents a pair of adjacent wells.
+  # Columns 1 and 2 -> A1,A2
+  # Columns 3 and 4 -> A3,A4
+  # Columns 5 and 6 -> A5,A6
+  long <-
+    long %>%
+    rowwise() %>% 
+    mutate(
+      wells = case_when(
+        
+        # For odd columns:
+        column %% 2 == 1 ~ 
+          paste( 
+            paste0(row,c(column, column+1)),
+            collapse = ","),
+        
+        # For even columns:
+        column %% 2 == 0 ~ 
+          paste( 
+            paste0(row,c(column-1, column)),
+            collapse = ",")
+      )
+    ) %>% ungroup()
+  
   # Check plate layout 
   if(
     validate_plate_layout(
     long,
     valid_rows      = valid_rows,
-    valid_columns   = valid_columns,
-    expected_wells  = expected_wells
+    valid_columns   = valid_columns
     ) == T){
       long %>%
     filter(!is.na(sample_id)) %>%
@@ -75,6 +97,7 @@ process_plate_layout <- function(path,
       row,
       column,
       well,
+      wells,
       sample_id
     ) %>%
     as_tibble()
@@ -86,8 +109,7 @@ process_plate_layout <- function(path,
 process_plate_layout_multisheet <- function(
     path,
     valid_rows = LETTERS[1:8],
-    valid_columns = 1:12,
-    expected_wells = 96){
+    valid_columns = 1:12){
   
   
   # Plate names stored in name of excel sheet 
@@ -171,8 +193,7 @@ process_plate_layout_multisheet <- function(
     validate_plate_layout(
     long,
     valid_rows      = valid_rows,
-    valid_columns   = valid_columns,
-    expected_wells  = expected_wells
+    valid_columns   = valid_columns
     ) == T){
     long %>%
       filter(!is.na(sample_id)) %>%
@@ -191,14 +212,15 @@ process_plate_layout_multisheet <- function(
 
 validate_plate_layout <- function(df,
                                   valid_rows = LETTERS[1:8],
-                                  valid_columns = 1:12,
-                                  expected_wells = 96) {
+                                  valid_columns = 1:12) {
   
   
   require(glue)
   require(tidyr)
   require(dplyr)
   require(rlang)
+  
+  expected_wells = length(valid_rows) * length(valid_columns)
   
   ##############################
   # Validate row identifiers

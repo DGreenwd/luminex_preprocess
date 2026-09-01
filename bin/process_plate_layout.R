@@ -140,6 +140,30 @@ process_plate_layout_multisheet <- function(
   
   long <- bind_rows(long)
   
+  # Each row/column represents a pair of adjacent wells.
+  # Columns 1 and 2 -> A1,A2
+  # Columns 3 and 4 -> A3,A4
+  # Columns 5 and 6 -> A5,A6
+  long <-
+    long %>%
+    rowwise() %>% 
+    mutate(
+      wells = case_when(
+        
+        # For odd columns:
+        column %% 2 == 1 ~ 
+          paste( 
+            paste0(row,c(column, column+1)),
+            collapse = ","),
+        
+        # For even columns:
+        column %% 2 == 0 ~ 
+          paste( 
+            paste0(row,c(column-1, column)),
+            collapse = ",")
+      )
+    ) %>% ungroup()
+  
   
    
   # Check plate layout 
@@ -157,6 +181,7 @@ process_plate_layout_multisheet <- function(
         row,
         column,
         well,
+        wells,
         sample_id
       ) %>%
       as_tibble()

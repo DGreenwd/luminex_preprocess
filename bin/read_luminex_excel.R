@@ -282,6 +282,32 @@ read_luminex_excel <- function(
       select(-original_name)
   }
   
+  ##############################
+  # Data checks 
+  ##############################
+  
+  # Check for failure to parse plate_id
+  tmp <- output %>%
+    group_by(filename) %>%
+    filter(any(is.na(plate_id) | plate_id == "")) %>%
+    select(filename, plate_id) %>%
+    distinct()
+  
+  if (nrow(tmp) > 0) {
+    warning(
+      paste0(
+        "Invalid plate_id produced:\n",
+        paste(
+          paste0(
+            "  ", tmp$filename,
+            " -> '", ifelse(is.na(tmp$plate_id), "NA", tmp$plate_id), "'"
+          ),
+          collapse = "\n"
+        )
+      )
+    )
+  }
+  
   output
 }
 
